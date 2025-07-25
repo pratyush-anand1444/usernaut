@@ -2,6 +2,8 @@ package fivetran
 
 import (
 	"context"
+	"fmt"
+	"sync"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
@@ -56,45 +58,107 @@ func (fc *FivetranClient) FetchTeamMembersByTeamID(
 
 }
 
-func (fc *FivetranClient) AddUserToTeam(ctx context.Context, teamID, userID string) error {
+const MaxConcurrent = 10 //we can change it accfordingly
+
+const maxConcurrentUsers = 10
+
+func (fc *FivetranClient) AddUserToTeam(ctx context.Context, teamID string, userIDs []string) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "fivetran",
-		"userID":  userID,
-		"teamID":  teamID,
+		"service":    "fivetran",
+		"teamID":     teamID,
+		"user_count": len(userIDs),
 	})
 
-	log.Info("adding user to the team")
-	resp, err := fc.fivetranClient.NewTeamUserMembershipCreate().
-		Role("Team Member").
-		TeamId(teamID).
-		UserId(userID).
-		Do(ctx)
-	if err != nil {
-		log.WithField("response", resp.CommonResponse).WithError(err).Error("error adding user to the team")
-		return err
+	log.Info("adding userds to the team")
 
+	var wg sync.WaitGroup
+	errr := make(chan error, len(userIDs)) // this is an errror channel
+	sem := make(chan struct{}, maxConcurrentUsers)
+
+	for _, id := range userIDs {
+		wg.Add(1)
+		sem <- struct{}{}
+
+		go func(uid string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			log := logger.Logger(ctx).WithFields(logrus.Fields{
+				"service": "fivetran",
+				"teamID":  teamID,
+				"userID":  uid,
+			})
+
+			log.Info("adding user to fivetran team ")
+			resp, err := fc.fivetranClient.
+				NewTeamUserMembershipCreate().
+				TeamId(teamID).
+				UserId(uid).
+				Role("Team Member").
+				Do(ctx)
+
+			if err != nil {
+				log.WithField("response", resp.CommonResponse).WithError(err).
+					Error("Error adding user to team")
+				errr <- fmt.Errorf("%s: %w", uid, err)
+				return
+			}
+			log.Info("added userds to the team successfuly")
+		}(id)
 	}
-	log.Info("user added to the team")
+
+	wg.Wait()
+	close(errr)
+
+	if err, ok := <-errr; ok {
+		return err
+	}
 	return nil
 }
 
-func (fc *FivetranClient) RemoveUserFromTeam(ctx context.Context, teamID, userID string) error {
+func (fc *FivetranClient) RemoveUserFromTeam(ctx context.Context, teamID string, userIDs []string) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "fivetran",
-		"userID":  userID,
-		"teamID":  teamID,
+		"service":    "fivetran",
+		"teamID":     teamID,
+		"user_count": len(userIDs),
 	})
 
 	log.Info("removing user from the team")
-	resp, err := fc.fivetranClient.NewTeamUserMembershipDelete().
-		TeamId(teamID).
-		UserId(userID).
-		Do(ctx)
-	if err != nil {
-		log.WithField("response", resp).WithError(err).Error("error removing user from the team")
-		return err
+	var wg sync.WaitGroup
+	errr := make(chan error, len(userIDs))
+	sem := make(chan struct{}, maxConcurrentUsers)
+
+	for _, id := range userIDs {
+		wg.Add(1)
+		sem <- struct{}{}
+
+		go func(uid string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			log := logger.Logger(ctx).WithFields(logrus.Fields{
+				"service": "fivetran",
+				"teamID":  teamID,
+				"userID":  uid,
+			})
+			log.Info("removing user from the team")
+			resp, err := fc.fivetranClient.NewTeamUserMembershipDelete().
+				TeamId(teamID).
+				UserId(uid).
+				Do(ctx)
+			if err != nil {
+				log.WithField("response", resp).WithError(err).Error("error removing user from the team")
+				return
+
+			}
+			log.Info("users removed from team successfuly")
+		}(id)
 
 	}
-	log.Info("user removed from the team")
+
+	wg.Wait()
+	close(errr)
+
+	if err, ok := <-errr; ok {
+		return err
+	}
 	return nil
 }

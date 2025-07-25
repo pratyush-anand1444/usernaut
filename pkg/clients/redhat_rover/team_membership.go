@@ -71,67 +71,74 @@ func (rC *RoverClient) FetchTeamMembersByTeamID(ctx context.Context, teamID stri
 }
 
 // AddUserToTeam adds a user to a team in Rover by teamID and userID
-func (rC *RoverClient) AddUserToTeam(ctx context.Context, teamID, userID string) error {
-	span, ctx := ot.StartSpanFromContext(ctx, "backend.redhatrover.AddUserToTeam")
+func (rC *RoverClient) AddUserToTeam(ctx context.Context, teamID string, userIDs []string) error {
+	span, ctx := ot.StartSpanFromContext(ctx, "backend.redhatrover.AddUsersToTeam")
 	defer span.Finish()
 
 	log := logger.Logger(ctx)
-	log.Info("Adding team member to the rover group")
+	log.Info("Adding team members to the rover group")
+
+	additions := make([]Member, 0, len(userIDs))
+	for _, id := range userIDs {
+		additions = append(additions, Member{
+			ID:   id,
+			Type: MemberTypeUser,
+		})
+	}
 
 	req := MemberModRequest{
-		Additions: []Member{
-			{
-				ID:   userID,
-				Type: MemberTypeUser,
-			},
-		},
+		Additions: additions,
 	}
 
 	_, respCode, err := rC.sendRequest(ctx, rC.url+"/v1/groups/"+teamID+"/membersMod",
 		http.MethodPost, req,
-		headers, "backend.redhatrover.AddUserToTeam")
+		headers, "backend.redhatrover.AddUsersToTeam")
 
 	if err != nil {
-		log.WithError(err).Error("failed to add user to rover group")
+		log.WithError(err).Error("failed to add users to rover group")
 		return err
 	}
 
 	if respCode != http.StatusOK {
-		log.Error("failed to add user to rover group")
-		return errors.New("failed to add user to rover group with response code: " + http.StatusText(respCode))
+		log.Error("failed to add users to rover group")
+		return errors.New("failed to add users to rover group with response code: " + http.StatusText(respCode))
 	}
 
 	return nil
 }
 
 // RemoveUserFromTeam removes a user from a team in Rover by teamID and userID
-func (rC *RoverClient) RemoveUserFromTeam(ctx context.Context, teamID, userID string) error {
+func (rC *RoverClient) RemoveUserFromTeam(ctx context.Context, teamID string, userIDs []string) error {
 	span, ctx := ot.StartSpanFromContext(ctx, "backend.redhatrover.RemoveUserFromTeam")
 	defer span.Finish()
 
 	log := logger.Logger(ctx)
-	log.Info("Removing team member from the rover group")
+	log.Info("Removing team members from the rover group")
+
+	deletions := make([]Member, 0, len(userIDs))
+	for _, id := range userIDs {
+		deletions = append(deletions, Member{
+			ID:   id,
+			Type: MemberTypeUser,
+		})
+	}
 
 	req := MemberModRequest{
-		Deletions: []Member{
-			{
-				ID:   userID,
-				Type: MemberTypeUser,
-			},
-		},
+		Deletions: deletions,
 	}
 
 	_, respCode, err := rC.sendRequest(ctx, rC.url+"/v1/groups/"+teamID+"/membersMod",
 		http.MethodPost, req,
 		headers, "backend.redhatrover.RemoveUserFromTeam")
+
 	if err != nil {
-		log.WithError(err).Error("failed to remove user from rover group")
+		log.WithError(err).Error("failed to remove users from rover group")
 		return err
 	}
 
 	if respCode != http.StatusOK {
-		log.Error("failed to remove user from rover group")
-		return errors.New("failed to remove user from rover group with response code: " + http.StatusText(respCode))
+		log.Error("failed to remove users from rover group")
+		return errors.New("failed to remove users from rover group with response code: " + http.StatusText(respCode))
 	}
 
 	return nil
